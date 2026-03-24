@@ -1,57 +1,97 @@
 import socket
-import csv
-import datetime
+import time
 
-HOST = "10.225.28.206"
-PORT = 5001
+ESP32_HOST = "10.225.28.206"
+ESP32_PORT = 5001
 
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server_socket.bind((HOST, PORT))
-server_socket.listen(1)
+LOCAL_SERVER = "127.0.0.1"
+LOCAL_PORT = 6000
 
-server_socket.settimeout(1.0)  # <-- tärkeä: accept() ei blokkaa ikuisesti
+def connect_to_local_processor():
+    while True:
+        try:
+            localSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            localSocket.connect((LOCAL_SERVER, LOCAL_PORT))
+            print(f"Connected to local server at {LOCAL_SERVER}:{LOCAL_PORT}")
+            return localSocket
+        except ConnectionRefusedError:
+            print("Waiting for local server...")
+            time.sleep(1)
 
-print(f"Listening for connections on port {PORT}...")
+def main():
+    forward_socket = connect_to_local_processor()
 
-csv_filename = "./saving_data/training_sensor_data_1.csv"
-with open(csv_filename, mode="w", newline="") as file:
-    writer = csv.writer(file)
-    writer.writerow(["Timestamp", "Sensor Value", "label"])
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind((ESP32_HOST, ESP32_PORT))
+    server_socket.listen(1)
+    server_socket.settimeout(1.0)
+
+    print(f"Listening for ESP32 on {ESP32_HOST}:{ESP32_PORT}")
 
     client_socket = None
+
     try:
-        # Odota yhteyttä (timeoutin takia loopissa)
         while True:
             try:
                 client_socket, client_address = server_socket.accept()
-                print(f"Connected to {client_address}")
-                client_socket.settimeout(1.0)  # <-- tärkeä: recv() ei blokkaa ikuisesti
-                break
+                print(f"ESP32 connected from {client_address}")
+                client_socket.settimeout(1.0)
+
+                buffer = ""
+
+                while True:
+                    try:
+                        data = client_socket.recv(1024)
+                        if not data:
+                            print("ESP32 disconnected.")
+                            break
+
+                        buffer += data.decode("utf-8")
+
+                        # käsitellään rivit yksi kerrallaan
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+
+                            if not line:
+                                continue
+
+                            print(f"Received from ESP32: {line}")
+
+                            message = line + "\n"
+
+                            #Error handeling
+                            try:
+                                forward_socket.sendall(message.encode("utf-8"))
+                            except (BrokenPipeError, ConnectionResetError):
+                                print("Local server disconnected. Reconnecting...")
+                                forward_socket.close()
+                                forward_socket = connect_to_local_processor()
+                                forward_socket.sendall(message.encode("utf-8"))
+
+                    except socket.timeout:
+                        continue
+
             except socket.timeout:
-                pass  # jatka odottelua, Ctrl+C toimii tässä välissä
+                continue
 
-        while True:
-            try:
-                data = client_socket.recv(1024)
-                if not data:
-                    print("Client disconnected.")
-                    break
-
-                text = data.decode("utf-8").strip()
-                if text:
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"Received: {text}")
-                    sensor_value = text.split(",")[0]
-                    writer.writerow([timestamp, sensor_value, "pressed"])
-                    file.flush()
-
-            except socket.timeout:
-                pass  # herää 1s välein -> Ctrl+C toimii
+            finally:
+                if client_socket:
+                    client_socket.close()
+                    client_socket = None
 
     except KeyboardInterrupt:
-        print("Server stopped (Ctrl+C).")
+        print("Receiver stopped.")
+
     finally:
         if client_socket:
             client_socket.close()
+        forward_socket.close()
         server_socket.close()
+
+
+if __name__ == "__main__":
+    main()
+
+
