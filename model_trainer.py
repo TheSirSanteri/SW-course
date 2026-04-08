@@ -1,66 +1,91 @@
-import json
 from pathlib import Path
+from collections import Counter
 
 import joblib
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
-DEFAULT_CLASSES = ["A", "B", "D", "F", "H", "I", "O", "W", "unknown"]
+FEATURE_COLUMNS = [f"voltage_{pin}" for pin in PIN_NAMES]
+
+# Target letters for classification
+TARGET_LETTERS = ["A", "B", "D", "F", "H", "I", "O", "W"]
+UNKNOWN_LABEL = "unknown"
+
+
+
+ALL_CLASSES = TARGET_LETTERS + [UNKNOWN_LABEL]
 
 DATASET_DIR = Path("./dataset")
 MODEL_DIR = Path("./models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
-
 MODEL_PATH = MODEL_DIR / "asl_letter_model.joblib"
-METADATA_PATH = MODEL_DIR / "asl_letter_model_metadata.json"
 
+TEST_SIZE = 0.20
 RANDOM_STATE = 42
-TEST_SIZE = 0.2
 
 
+def find_dataset_files(dataset_dir: Path):
+    csv_files = sorted(dataset_dir.glob("*.csv"))
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in {dataset_dir.resolve()}")
+    return csv_files
 
-def load_dataset(csv_path: Path):
-    df = pd.read_csv(csv_path)
 
-    required_columns = ["label"] + [f"voltage_{pin}" for pin in PIN_NAMES]
+def load_all_datasets(dataset_dir: Path):
+    csv_files = find_dataset_files(dataset_dir)
+    dataframes = []
+
+    for csv_file in csv_files:
+        df = pd.read_csv(csv_file)
+        df["source_file"] = csv_file.name
+        dataframes.append(df)
+
+    combined_df = pd.concat(dataframes, ignore_index=True)
+    return combined_df, csv_files
+
+
+def validate_columns(df: pd.DataFrame):
+    required_columns = ["label"] + FEATURE_COLUMNS
     missing = [col for col in required_columns if col not in df.columns]
     if missing:
-        raise ValueError(f"CSV-tiedostosta puuttuvat sarakkeet: {missing}")
-
-    df = df.dropna(subset=["label"])
-    return df
+        raise ValueError(f"Dataset is missing required columns: {missing}")
 
 
+def normalize_label(label):
+    label = str(label).strip().upper()
+    if label in TARGET_LETTERS:
+        return label
+    return UNKNOWN_LABEL
 
-def build_features(df: pd.DataFrame):
-    feature_columns = [f"voltage_{pin}" for pin in PIN_NAMES]
-    X = df[feature_columns].copy()
-    y = df["label"].astype(str).copy()
-    return X, y, feature_columns
+# Helper function to print class distribution in a readable format
+def prepare_dataset(df: pd.DataFrame):
+    validate_columns(df)
+
+    df = df.dropna(subset=["label"]).copy()
+    df["label"] = df["label"].apply(normalize_label)
+
+    for col in FEATURE_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna(subset=FEATURE_COLUMNS, how="all").copy()
+    X = df[FEATURE_COLUMNS].copy()
+    y = df["label"].copy()
+    return df, X, y
 
 
-
-def train_model(X_train, y_train):
-    # StandardScaler ei ole RandomForestille välttämätön, mutta jätetään pipelineen,
-    # jotta voitte helposti vaihtaa mallia myöhemmin.
+def build_model():
     model = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
             (
                 "classifier",
                 RandomForestClassifier(
                     n_estimators=300,
-                    max_depth=None,
-                    min_samples_split=2,
-                    min_samples_leaf=1,
                     random_state=RANDOM_STATE,
                     class_weight="balanced",
                     n_jobs=-1,
@@ -68,65 +93,44 @@ def train_model(X_train, y_train):
             ),
         ]
     )
-    model.fit(X_train, y_train)
     return model
 
+def attach_model_info(model):
+    model.target_letters_ = TARGET_LETTERS.copy()
+    model.unknown_label_ = UNKNOWN_LABEL
+    model.all_classes_ = ALL_CLASSES.copy()
+    model.feature_columns_ = FEATURE_COLUMNS.copy()
+    return model
 
-
-def print_results(model, X_test, y_test, classes):
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-
-    print("\n=== TULOKSET ===")
-    print(f"Test accuracy: {accuracy:.4f}")
-    print("\nClassification report:")
-    print(classification_report(y_test, y_pred, labels=classes, zero_division=0))
-
-    cm = confusion_matrix(y_test, y_pred, labels=classes)
-    cm_df = pd.DataFrame(cm, index=classes, columns=classes)
-    print("Confusion matrix:")
-    print(cm_df.to_string())
-
-
-
-def save_outputs(model, classes, feature_columns):
-    joblib.dump(model, MODEL_PATH)
-
-    metadata = {
-        "classes": classes,
-        "feature_columns": feature_columns,
-        "pin_names": PIN_NAMES,
-        "model_type": "RandomForestClassifier",
-    }
-
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-    print(f"\nMalli tallennettu: {MODEL_PATH}")
-    print(f"Metadata tallennettu: {METADATA_PATH}")
-
+def print_label_counts(title: str, labels):
+    counts = Counter(labels)
+    print(f"\n{title}")
+    for class_name in ALL_CLASSES:
+        print(f"  {class_name}: {counts.get(class_name, 0)}")
 
 
 def main():
-    default_csv = DATASET_DIR / "asl_dataset.csv"
-    csv_input = input(f"Anna datasetin polku [{default_csv}]: ").strip()
-    csv_path = Path(csv_input) if csv_input else default_csv
+    print(f"Reading CSV files from: {DATASET_DIR.resolve()}")
+    df, csv_files = load_all_datasets(DATASET_DIR)
 
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Dataset tiedostoa ei löydy: {csv_path}")
+    print("\nFiles used:")
+    for csv_file in csv_files:
+        print(f"  - {csv_file.name}")
 
-    df = load_dataset(csv_path)
-    print(f"Luettiin {len(df)} riviä tiedostosta {csv_path}")
+    print(f"\nTotal raw rows: {len(df)}")
 
-    label_counts = df["label"].value_counts().sort_index()
-    print("\nLuokkajakauma:")
-    print(label_counts.to_string())
+    df, X, y = prepare_dataset(df)
+    print(f"Rows after cleaning: {len(df)}")
 
-    X, y, feature_columns = build_features(df)
+    print_label_counts("Class distribution after mapping", y)
 
-    classes = sorted(set(DEFAULT_CLASSES) | set(y.unique()))
+    if len(df) < 10:
+        raise ValueError("Not enough data for training. Collect more samples first.")
 
-    X_train, X_test, y_train, y_test = train_test_split(
+    if y.nunique() < 2:
+        raise ValueError("Training requires at least two classes in the dataset.")
+
+    X_train, X_val, y_train, y_val = train_test_split(
         X,
         y,
         test_size=TEST_SIZE,
@@ -134,14 +138,32 @@ def main():
         stratify=y,
     )
 
-    print(f"\nTrain-koko: {len(X_train)}")
-    print(f"Test-koko:  {len(X_test)}")
+    print(f"\nTraining set:   {len(X_train)} rows (80%)")
+    print(f"Validation set: {len(X_val)} rows (20%)")
 
-    model = train_model(X_train, y_train)
-    print_results(model, X_test, y_test, classes)
-    save_outputs(model, classes, feature_columns)
+    print_label_counts("Training distribution", y_train)
+    print_label_counts("Validation distribution", y_val)
 
-    print("\nValmis. Tätä mallia alphabet_calculator.py voi käyttää reaaliaikaisessa luokittelussa.")
+    model = build_model()
+    model.fit(X_train, y_train)
+    model = attach_model_info(model)
+
+    y_pred = model.predict(X_val)
+    accuracy = accuracy_score(y_val, y_pred)
+
+    print("\n=== VALIDATION RESULTS ===")
+    print(f"Accuracy: {accuracy:.4f}")
+    print("\nClassification report:")
+    print(classification_report(y_val, y_pred, labels=ALL_CLASSES, zero_division=0))
+
+    cm = confusion_matrix(y_val, y_pred, labels=ALL_CLASSES)
+    cm_df = pd.DataFrame(cm, index=ALL_CLASSES, columns=ALL_CLASSES)
+    print("Confusion matrix:")
+    print(cm_df.to_string())
+
+    joblib.dump(model, MODEL_PATH)
+    print(f"\nModel saved to: {MODEL_PATH.resolve()}")
+    print("This file can be used directly by alphabet_calculator.py")
 
 
 if __name__ == "__main__":

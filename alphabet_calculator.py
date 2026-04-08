@@ -1,6 +1,5 @@
 import socket
 import sys
-import json
 from pathlib import Path
 
 import numpy as np
@@ -9,35 +8,14 @@ import joblib
 HOST = "127.0.0.1"
 PORT = 6000
 
-"""
-Sensors:
-
-Fingers (lower voltage means more bent):
-D0 - thumb
-D1 - index
-D2 - middle
-D3 - ring
-D4 - pinky
-
-pressure sensors (lower voltage means more pressure):
-D5 - thumb
-D8 - index
-D9 - middle
-D10 - ring
-"""
- 
-
 
 PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
 EXPECTED_VALUES = len(PIN_NAMES)
 ADC_MAX = 4095.0
 REFERENCE_VOLTAGE = 3.3
 
-MODEL_PATH = Path("./models/asl_letter_model.joblib")
-METADATA_PATH = Path("./models/asl_letter_model_metadata.json")
-
-DEFAULT_CLASSES = ["A", "B", "D", "F", "H", "I", "O", "W", "unknown"]
-
+# Model path
+MODEL_PATH = Path("./models/")
 
 # threshold for classifying a prediction as "unknown" if the confidence is too low
 UNKNOWN_THRESHOLD = 0.60
@@ -63,19 +41,14 @@ def build_feature_vector(raw_values, voltages):
     return features
 
 
-def load_classes():
-    if METADATA_PATH.exists():
-        try:
-            with open(METADATA_PATH, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
+def get_recognized_letters(model):
+    if hasattr(model, "target_letters_"):
+        return list(model.target_letters_)
 
-            classes = metadata.get("classes")
-            if isinstance(classes, list) and len(classes) > 0:
-                return classes
-        except Exception as e:
-            print(f"Warning: metadata loading failed: {e}")
+    if hasattr(model, "classes_"):
+        return [cls for cls in model.classes_ if str(cls).lower() != "unknown"]
 
-    return DEFAULT_CLASSES
+    return []
 
 def load_model():
     if not MODEL_PATH.exists():
@@ -87,7 +60,7 @@ def load_model():
     model = joblib.load(MODEL_PATH)
     return model
 
-def predict_letter(model, classes, raw_values, voltages):
+def predict_letter(model, raw_values, voltages):
     features = build_feature_vector(raw_values, voltages)
 
     # first try to use predict_proba if available for confidence estimation, otherwise fall back to predict
@@ -99,8 +72,8 @@ def predict_letter(model, classes, raw_values, voltages):
         if hasattr(model, "classes_"):
             model_classes = list(model.classes_)
         else:
-            model_classes = classes
-
+            raise ValueError("Model does not contain classes_.")
+        
         predicted_label = str(model_classes[best_index])
 
         if best_probability < UNKNOWN_THRESHOLD:
@@ -112,16 +85,9 @@ def predict_letter(model, classes, raw_values, voltages):
     predicted_label = str(model.predict(features)[0])
     return predicted_label, None, None
 
-def print_status_inline(voltages, predicted_label, confidence=None):
+def print_status_inline(voltages, predicted_label):
     voltage_text = " ; ".join(f"{v:.2f}" for v in voltages) + " ;"
-
-    if confidence is None:
-        status = f"Voltage: {voltage_text}   |   Prediction: {predicted_label}"
-    else:
-        status = (
-            f"Voltage: {voltage_text}   |   "
-            f"Prediction: {predicted_label} ({confidence:.2f})"
-        )
+    status = f"Voltages: {voltage_text}   |   Letter: {predicted_label}"
 
     sys.stdout.write("\r" + " " * 220 + "\r")
     sys.stdout.write(status)
@@ -130,8 +96,8 @@ def print_status_inline(voltages, predicted_label, confidence=None):
 
 
 def main():
-    classes = load_classes()
     model = load_model()
+    recognized_letters = get_recognized_letters(model)
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -139,7 +105,7 @@ def main():
     server_socket.listen(1)
 
     print(f"Realtime classifier listening on {HOST}:{PORT}")
-    print(f"Classes: {', '.join(classes)}")
+    print(f"Recognized letters: {', '.join(recognized_letters)}")
     print("Waiting for data from local server...")
 
     client_socket, client_address = server_socket.accept()
@@ -165,10 +131,10 @@ def main():
 
                 try:
                     raw_values, voltages = parse_sensor_line(line)
-                    predicted_label, confidence, _ = predict_letter(
-                        model, classes, raw_values, voltages
+                    predicted_label, _, _ = predict_letter(
+                        model, raw_values, voltages
                     )
-                    print_status_inline(voltages, predicted_label, confidence)
+                    print_status_inline(voltages, predicted_label)
 
                 except ValueError as e:
                     sys.stdout.write("\n")

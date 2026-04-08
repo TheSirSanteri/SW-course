@@ -7,6 +7,24 @@ ESP32_PORT = 5001
 LOCAL_SERVER = "127.0.0.1"
 LOCAL_PORT = 6000
 
+"""
+Sensors:
+
+Fingers (lower voltage means more bent):
+D0 - thumb
+D1 - index
+D2 - middle
+D3 - ring
+D4 - pinky
+
+pressure sensors (lower voltage means more pressure):
+D5 - thumb
+D8 - index
+D9 - middle
+D10 - ring
+"""
+
+
 def connect_to_local_processor():
     while True:
         try:
@@ -49,7 +67,7 @@ def main():
 
                         buffer += data.decode("utf-8")
 
-                        # käsitellään rivit yksi kerrallaan
+                        # handle multiple lines in the buffer
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
                             line = line.strip()
