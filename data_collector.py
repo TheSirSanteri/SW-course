@@ -7,13 +7,13 @@ from pathlib import Path
 HOST = "127.0.0.1"
 PORT = 6000
 
-PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
+PIN_NAMES = ["A0", "A1", "A2", "A3", "A4", "D7", "D8", "D9", "D10"]
 EXPECTED_VALUES = len(PIN_NAMES)
 
 ADC_MAX = 4095.0
 REFERENCE_VOLTAGE = 3.3
 
-OUTPUT_DIR = Path("./dataset")
+OUTPUT_DIR = Path("./datasets")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

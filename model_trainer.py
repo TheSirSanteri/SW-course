@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
+PIN_NAMES = ["A0", "A1", "A2", "A3", "A4", "D7", "D8", "D9", "D10"]
 FEATURE_COLUMNS = [f"voltage_{pin}" for pin in PIN_NAMES]
 
 # Target letters for classification
@@ -20,7 +20,7 @@ UNKNOWN_LABEL = "unknown"
 
 ALL_CLASSES = TARGET_LETTERS + [UNKNOWN_LABEL]
 
-DATASET_DIR = Path("./dataset")
+DATASET_DIR = Path("./datasets")
 MODEL_DIR = Path("./models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_PATH = MODEL_DIR / "asl_letter_model.joblib"
