@@ -1,14 +1,47 @@
 import socket
 import sys
-from collections import deque
+import json
+from pathlib import Path
+
+import numpy as np
+import joblib
 
 HOST = "127.0.0.1"
 PORT = 6000
+
+"""
+Sensors:
+
+Fingers (lower voltage means more bent):
+D0 - thumb
+D1 - index
+D2 - middle
+D3 - ring
+D4 - pinky
+
+pressure sensors (lower voltage means more pressure):
+D5 - thumb
+D8 - index
+D9 - middle
+D10 - ring
+"""
+ 
+
 
 PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
 EXPECTED_VALUES = len(PIN_NAMES)
 ADC_MAX = 4095.0
 REFERENCE_VOLTAGE = 3.3
+
+MODEL_PATH = Path("./models/asl_letter_model.joblib")
+METADATA_PATH = Path("./models/asl_letter_model_metadata.json")
+
+DEFAULT_CLASSES = ["A", "B", "D", "F", "H", "I", "O", "W", "unknown"]
+
+
+# threshold for classifying a prediction as "unknown" if the confidence is too low
+UNKNOWN_THRESHOLD = 0.60
+
 
 def adc_to_voltage(raw_value: float) -> float:
     return (raw_value / ADC_MAX) * REFERENCE_VOLTAGE
@@ -21,25 +54,93 @@ def parse_sensor_line(line: str):
         raise ValueError(f"Expected {EXPECTED_VALUES} values, got {len(parts)}")
 
     raw_values = [float(part) for part in parts]
-    return [adc_to_voltage(value) for value in raw_values]
+    voltages = [adc_to_voltage(value) for value in raw_values]
+    return raw_values, voltages
 
 
-def print_voltages_inline(voltages):
-    formatted = " ; ".join(f"{voltage:.2f}" for voltage in voltages) + " ;"
-    # Tyhjennetään aiempi rivi ja kirjoitetaan uusi samalle riville
-    sys.stdout.write("\r" + " " * 120 + "\r")
-    sys.stdout.write(formatted)
+def build_feature_vector(raw_values, voltages):
+    features = np.array(voltages, dtype=np.float32).reshape(1, -1)
+    return features
+
+
+def load_classes():
+    if METADATA_PATH.exists():
+        try:
+            with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+
+            classes = metadata.get("classes")
+            if isinstance(classes, list) and len(classes) > 0:
+                return classes
+        except Exception as e:
+            print(f"Warning: metadata loading failed: {e}")
+
+    return DEFAULT_CLASSES
+
+def load_model():
+    if not MODEL_PATH.exists():
+        # Error handling
+        raise FileNotFoundError(
+            f"Model file not found: {MODEL_PATH}\n"
+        )
+
+    model = joblib.load(MODEL_PATH)
+    return model
+
+def predict_letter(model, classes, raw_values, voltages):
+    features = build_feature_vector(raw_values, voltages)
+
+    # first try to use predict_proba if available for confidence estimation, otherwise fall back to predict
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(features)[0]
+        best_index = int(np.argmax(probabilities))
+        best_probability = float(probabilities[best_index])
+
+        if hasattr(model, "classes_"):
+            model_classes = list(model.classes_)
+        else:
+            model_classes = classes
+
+        predicted_label = str(model_classes[best_index])
+
+        if best_probability < UNKNOWN_THRESHOLD:
+            return "unknown", best_probability, dict(zip(model_classes, probabilities))
+
+        return predicted_label, best_probability, dict(zip(model_classes, probabilities))
+
+    # backup: if predict_proba is not available, just use predict without confidence estimation
+    predicted_label = str(model.predict(features)[0])
+    return predicted_label, None, None
+
+def print_status_inline(voltages, predicted_label, confidence=None):
+    voltage_text = " ; ".join(f"{v:.2f}" for v in voltages) + " ;"
+
+    if confidence is None:
+        status = f"Voltage: {voltage_text}   |   Prediction: {predicted_label}"
+    else:
+        status = (
+            f"Voltage: {voltage_text}   |   "
+            f"Prediction: {predicted_label} ({confidence:.2f})"
+        )
+
+    sys.stdout.write("\r" + " " * 220 + "\r")
+    sys.stdout.write(status)
     sys.stdout.flush()
 
 
+
 def main():
+    classes = load_classes()
+    model = load_model()
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((HOST, PORT))
     server_socket.listen(1)
 
-    print(f"Realtime processor listening on {HOST}:{PORT}")
-    print("Jännitteet")
+    print(f"Realtime classifier listening on {HOST}:{PORT}")
+    print(f"Classes: {', '.join(classes)}")
+    print("Waiting for data from local server...")
 
     client_socket, client_address = server_socket.accept()
     print(f"Local sender connected from {client_address}")
@@ -63,13 +164,20 @@ def main():
                     continue
 
                 try:
-                    voltages = parse_sensor_line(line)
-                    print_voltages_inline(voltages)
+                    raw_values, voltages = parse_sensor_line(line)
+                    predicted_label, confidence, _ = predict_letter(
+                        model, classes, raw_values, voltages
+                    )
+                    print_status_inline(voltages, predicted_label, confidence)
+
                 except ValueError as e:
                     sys.stdout.write("\n")
-                    print(f"Virhe rivissä: {line}")
-                    print(f"Syy: {e}")
-                    print("Jännitteet")
+                    print(f"error in line: {line}")
+                    print(f"reason: {e}")
+
+                except Exception as e:
+                    sys.stdout.write("\n")
+                    print(f"classification problem: {e}")
 
     except KeyboardInterrupt:
         print("\nProcessor stopped.")

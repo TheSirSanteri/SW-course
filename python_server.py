@@ -61,7 +61,7 @@ def main():
 
                             message = line + "\n"
 
-                            #Error handeling
+                            #Error handling
                             try:
                                 forward_socket.sendall(message.encode("utf-8"))
                             except (BrokenPipeError, ConnectionResetError):
