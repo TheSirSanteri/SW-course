@@ -1,6 +1,7 @@
 import socket
 import sys
 from pathlib import Path
+import pandas as pd
 
 import numpy as np
 import joblib
@@ -9,17 +10,18 @@ HOST = "127.0.0.1"
 PORT = 6000
 
 
-PIN_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D8", "D9", "D10"]
+PIN_NAMES = ["A0", "A1", "A2", "A3", "A4", "D7", "D8", "D9", "D10"]
 EXPECTED_VALUES = len(PIN_NAMES)
 ADC_MAX = 4095.0
 REFERENCE_VOLTAGE = 3.3
 
 # Model path
-MODEL_PATH = Path("./models/")
+MODEL_PATH = Path("./models/asl_letter_model.joblib")
 
 # threshold for classifying a prediction as "unknown" if the confidence is too low
 UNKNOWN_THRESHOLD = 0.60
 
+FEATURE_COLUMNS = [f"voltage_{pin}" for pin in PIN_NAMES]
 
 def adc_to_voltage(raw_value: float) -> float:
     return (raw_value / ADC_MAX) * REFERENCE_VOLTAGE
@@ -37,8 +39,7 @@ def parse_sensor_line(line: str):
 
 
 def build_feature_vector(raw_values, voltages):
-    features = np.array(voltages, dtype=np.float32).reshape(1, -1)
-    return features
+    return pd.DataFrame([voltages], columns=FEATURE_COLUMNS)
 
 
 def get_recognized_letters(model):
@@ -87,10 +88,9 @@ def predict_letter(model, raw_values, voltages):
 
 def print_status_inline(voltages, predicted_label):
     voltage_text = " ; ".join(f"{v:.2f}" for v in voltages) + " ;"
-    status = f"Voltages: {voltage_text}   |   Letter: {predicted_label}"
+    status = f"Voltages: {voltage_text} | Letter: {predicted_label}"
 
-    sys.stdout.write("\r" + " " * 220 + "\r")
-    sys.stdout.write(status)
+    sys.stdout.write("\r" + status.ljust(200))
     sys.stdout.flush()
 
 
@@ -137,13 +137,12 @@ def main():
                     print_status_inline(voltages, predicted_label)
 
                 except ValueError as e:
-                    sys.stdout.write("\n")
-                    print(f"error in line: {line}")
-                    print(f"reason: {e}")
+                    sys.stdout.write("\r" + f"Invalid data: {e}".ljust(200))
+                    sys.stdout.flush()
 
                 except Exception as e:
-                    sys.stdout.write("\n")
-                    print(f"classification problem: {e}")
+                    sys.stdout.write("\r" + f"Classification problem: {e}".ljust(200))
+                    sys.stdout.flush()
 
     except KeyboardInterrupt:
         print("\nProcessor stopped.")

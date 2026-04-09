@@ -98,7 +98,8 @@ def receiver_loop(client_socket, latest_frame: LatestFrame):
 
 
 def main():
-    filename = input("CSV file name: ").strip() or "asl_dataset.csv"
+    filename = input("CSV file name: ").strip() or "data"
+    filename += ".csv"
     csv_path = OUTPUT_DIR / filename
     create_csv_if_missing(csv_path)
 
