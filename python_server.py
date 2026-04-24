@@ -1,7 +1,7 @@
 import socket
 import time
 
-ESP32_HOST = "10.40.18.206"
+ESP32_HOST = "0.0.0.0"
 ESP32_PORT = 5001
 
 LOCAL_SERVER = "127.0.0.1"

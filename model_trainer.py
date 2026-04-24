@@ -13,7 +13,7 @@ PIN_NAMES = ["A0", "A1", "A2", "A3", "A4", "D7", "D8", "D9", "D10"]
 FEATURE_COLUMNS = [f"voltage_{pin}" for pin in PIN_NAMES]
 
 # Target letters for classification
-TARGET_LETTERS = ["A", "B", "D", "F", "H", "I", "O", "W"]
+TARGET_LETTERS = ["A", "B", "F", "M", "T", "V", "W", "Y"]
 UNKNOWN_LABEL = "unknown"
 
 

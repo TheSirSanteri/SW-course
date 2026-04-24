@@ -19,7 +19,7 @@ REFERENCE_VOLTAGE = 3.3
 MODEL_PATH = Path("./models/asl_letter_model.joblib")
 
 # threshold for classifying a prediction as "unknown" if the confidence is too low
-UNKNOWN_THRESHOLD = 0.60
+UNKNOWN_THRESHOLD = 0.40
 
 FEATURE_COLUMNS = [f"voltage_{pin}" for pin in PIN_NAMES]
 

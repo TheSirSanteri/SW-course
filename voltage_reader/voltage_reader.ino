@@ -5,7 +5,7 @@ const char* ssid = "Santeri's Galaxy A53 5G";     // Replace with your WiFi SSID
 const char* password = "santerisanteri"; // Replace with your WiFi password
 
 // Server details (your computer's IP and port)
-const char* serverIP = "10.40.18.206";  // Replace with your computer's local IP/ the IP after your computer connect to the hotspot
+const char* serverIP = "10.125.47.206";  // Replace with your computer's local IP/ the IP after your computer connect to the hotspot
 const int serverPort = 5001;  // Must match the server Python script
 
 const int sensorPins[] = {D0, D1, D2, D3, D4, D5, D8, D9, D10};
